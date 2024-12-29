@@ -1,7 +1,133 @@
-<h1>Editing {{.Title}}</h1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Editing {{.Title}} - Wiki</title>
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --accent-color: #3498db;
+            --background-color: #f9f9f9;
+            --text-color: #333;
+            --max-width: 800px;
+        }
 
-<form action="/save/{{.Title}}" method="POST">
-    <div><textarea name="body" rows="20" cols="80">{{.RawBody}}</textarea></div> <!-- Use RawBody -->
-    <div><input type="submit" value="Save"></div>
-</form>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background: var(--background-color);
+            margin: 0;
+            padding: 20px;
+        }
 
+        .container {
+            max-width: var(--max-width);
+            margin: 0 auto;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .editor-form {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .editor-textarea {
+            width: 100%;
+            min-height: 400px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            resize: vertical;
+        }
+
+        .editor-textarea:focus {
+            outline: none;
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        .button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.2s;
+        }
+
+        .button-primary {
+            background-color: var(--accent-color);
+            color: white;
+        }
+
+        .button-primary:hover {
+            background-color: #2980b9;
+        }
+
+        .button-secondary {
+            background-color: #95a5a6;
+            color: white;
+        }
+
+        .button-secondary:hover {
+            background-color: #7f8c8d;
+        }
+
+        .markdown-help {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Editing: {{.Title}}</h1>
+            <div class="nav">
+                <a href="/view/{{.Title}}">Cancel</a>
+                <a href="/view/Directory">Directory</a>
+                <a href="/view/FrontPage">Home</a>
+            </div>
+        </div>
+
+        <form class="editor-form" action="/save/{{.Title}}" method="POST">
+            <textarea
+                name="body"
+                class="editor-textarea"
+                placeholder="Enter your content here using Markdown..."
+                spellcheck="true"
+                autofocus>{{.RawBody}}</textarea>
+
+            <div class="button-group">
+                <button type="submit" class="button button-primary">Save Changes</button>
+                <a href="/view/{{.Title}}" class="button button-secondary">Cancel</a>
+            </div>
+
+            <div class="markdown-help">
+                <strong>Markdown Tips:</strong><br>
+                # Header 1 | ## Header 2 | ### Header 3<br>
+                **bold** | *italic* | `code`<br>
+                [link](url) | ![image](url)<br>
+                - bullet list | 1. numbered list
+            </div>
+        </form>
+    </div>
+</body>
+</html>

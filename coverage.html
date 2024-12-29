@@ -1,0 +1,441 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>go-wiki: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">go-wiki/wiki.go (59.4%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package main
+
+import (
+        "errors"
+        "html/template"
+        "io/fs"
+        "log"
+        "net/http"
+        "os"
+        "path/filepath"
+        "regexp"
+        "strings"
+        "sync"
+
+        "github.com/yuin/goldmark"
+)
+
+// Constants define our system boundaries
+const (
+        // Maximum size for page content to prevent memory exhaustion
+        max_page_size_bytes = 1 &lt;&lt; 20 // 1MB
+
+        // Maximum number of concurrent requests to prevent resource exhaustion
+        max_concurrent_requests = 100
+
+        // Maximum number of pages to list in directory
+        max_directory_pages = 1000
+
+        // Default data directory if not specified
+        default_data_dir = "data"
+)
+
+// Common errors
+var (
+        ErrPageTooLarge = errors.New("page content exceeds maximum allowed size")
+        ErrEmptyTitle   = errors.New("page title cannot be empty")
+        ErrServerBusy   = errors.New("server is at maximum capacity")
+)
+
+// Page represents a wiki page with its metadata
+type Page struct {
+        Title       string
+        Body        template.HTML // rendered HTML content
+        RawBody     string       // raw markdown content
+        Size_bytes  int64        // size of raw content
+        Modified_at int64        // unix timestamp
+}
+
+// Assert that the page is valid before any operation
+func (p *Page) validate() error <span class="cov8" title="1">{
+        if p.Title == "" </span><span class="cov0" title="0">{
+                return ErrEmptyTitle
+        }</span>
+        <span class="cov8" title="1">if int64(len(p.RawBody)) &gt; max_page_size_bytes </span><span class="cov8" title="1">{
+                return ErrPageTooLarge
+        }</span>
+        <span class="cov8" title="1">return nil</span>
+}
+
+// getDataDir returns the configured data directory or default
+func getDataDir() string <span class="cov8" title="1">{
+        if dir := os.Getenv("WIKI_DATA_DIR"); dir != "" </span><span class="cov8" title="1">{
+                return dir
+        }</span>
+        <span class="cov0" title="0">return default_data_dir</span>
+}
+
+func (p *Page) save() error <span class="cov8" title="1">{
+        // Validate before saving
+        if err := p.validate(); err != nil </span><span class="cov8" title="1">{
+                return err
+        }</span>
+
+        <span class="cov8" title="1">filename := filepath.Join(getDataDir(), p.Title+".md")
+        return os.WriteFile(filename, []byte(p.RawBody), 0600)</span>
+}
+
+func loadPage(title string) (*Page, error) <span class="cov8" title="1">{
+        if title == "" </span><span class="cov0" title="0">{
+                return nil, ErrEmptyTitle
+        }</span>
+
+        <span class="cov8" title="1">filename := filepath.Join(getDataDir(), title+".md")
+        body, err := os.ReadFile(filename)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        // Check size bounds
+        <span class="cov8" title="1">if len(body) &gt; max_page_size_bytes </span><span class="cov0" title="0">{
+                return nil, ErrPageTooLarge
+        }</span>
+
+        // Get file info for metadata
+        <span class="cov8" title="1">info, err := os.Stat(filename)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        // Convert markdown to HTML
+        <span class="cov8" title="1">var html_body strings.Builder
+        if err := goldmark.Convert(body, &amp;html_body); err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov8" title="1">page := &amp;Page{
+                Title:       title,
+                Body:        template.HTML(html_body.String()),
+                RawBody:     string(body),
+                Size_bytes:  info.Size(),
+                Modified_at: info.ModTime().Unix(),
+        }
+
+        // Validate after loading
+        if err := page.validate(); err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov8" title="1">return page, nil</span>
+}
+
+// RequestLimiter implements a concurrent request limiter
+type RequestLimiter struct {
+        semaphore chan struct{}
+}
+
+func NewRequestLimiter() *RequestLimiter <span class="cov8" title="1">{
+        return &amp;RequestLimiter{
+                semaphore: make(chan struct{}, max_concurrent_requests),
+        }
+}</span>
+
+func (l *RequestLimiter) Acquire() error <span class="cov8" title="1">{
+        select </span>{
+        case l.semaphore &lt;- struct{}{}:<span class="cov8" title="1">
+                return nil</span>
+        default:<span class="cov0" title="0">
+                return ErrServerBusy</span>
+        }
+}
+
+func (l *RequestLimiter) Release() <span class="cov8" title="1">{
+        &lt;-l.semaphore
+}</span>
+
+// Wiki represents our application state
+type Wiki struct {
+        templates *template.Template
+        limiter   *RequestLimiter
+        mu        sync.RWMutex // Protects concurrent page operations
+}
+
+func NewWiki() (*Wiki, error) <span class="cov8" title="1">{
+        // Ensure data directory exists
+        dataDir := getDataDir()
+        if err := os.MkdirAll(dataDir, 0755); err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        // Load templates
+        <span class="cov8" title="1">templates, err := template.ParseGlob("templates/*.html")
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov8" title="1">return &amp;Wiki{
+                templates: templates,
+                limiter:   NewRequestLimiter(),
+        }, nil</span>
+}
+
+func (w *Wiki) viewHandler(writer http.ResponseWriter, request *http.Request, title string) <span class="cov8" title="1">{
+        if err := w.limiter.Acquire(); err != nil </span><span class="cov0" title="0">{
+                http.Error(writer, err.Error(), http.StatusServiceUnavailable)
+                return
+        }</span>
+        <span class="cov8" title="1">defer w.limiter.Release()
+
+        if title == "Directory" </span><span class="cov8" title="1">{
+                w.serveDirectory(writer)
+                return
+        }</span>
+
+        <span class="cov8" title="1">w.mu.RLock()
+        page, err := loadPage(title)
+        w.mu.RUnlock()
+
+        if err != nil </span><span class="cov0" title="0">{
+                if os.IsNotExist(err) </span><span class="cov0" title="0">{
+                        http.Redirect(writer, request, "/edit/"+title, http.StatusFound)
+                        return
+                }</span>
+                <span class="cov0" title="0">http.Error(writer, err.Error(), http.StatusInternalServerError)
+                return</span>
+        }
+
+        <span class="cov8" title="1">w.renderTemplate(writer, "view", page)</span>
+}
+
+func (w *Wiki) editHandler(writer http.ResponseWriter, request *http.Request, title string) <span class="cov0" title="0">{
+        if err := w.limiter.Acquire(); err != nil </span><span class="cov0" title="0">{
+                http.Error(writer, err.Error(), http.StatusServiceUnavailable)
+                return
+        }</span>
+        <span class="cov0" title="0">defer w.limiter.Release()
+
+        w.mu.RLock()
+        page, err := loadPage(title)
+        w.mu.RUnlock()
+
+        if err != nil &amp;&amp; !os.IsNotExist(err) </span><span class="cov0" title="0">{
+                http.Error(writer, err.Error(), http.StatusInternalServerError)
+                return
+        }</span>
+
+        <span class="cov0" title="0">if err != nil </span><span class="cov0" title="0">{
+                page = &amp;Page{Title: title}
+        }</span>
+
+        <span class="cov0" title="0">w.renderTemplate(writer, "edit", page)</span>
+}
+
+func (w *Wiki) saveHandler(writer http.ResponseWriter, request *http.Request, title string) <span class="cov8" title="1">{
+    // Only accept POST method
+    if request.Method != http.MethodPost </span><span class="cov0" title="0">{
+        http.Error(writer, "Method not allowed", http.StatusMethodNotAllowed)
+        return
+    }</span>
+
+    <span class="cov8" title="1">if err := w.limiter.Acquire(); err != nil </span><span class="cov0" title="0">{
+        http.Error(writer, err.Error(), http.StatusServiceUnavailable)
+        return
+    }</span>
+    <span class="cov8" title="1">defer w.limiter.Release()
+
+    // Parse form data
+    if err := request.ParseForm(); err != nil </span><span class="cov0" title="0">{
+        http.Error(writer, err.Error(), http.StatusBadRequest)
+        return
+    }</span>
+
+    <span class="cov8" title="1">body := request.FormValue("body")
+    page := &amp;Page{Title: title, RawBody: body}
+
+    w.mu.Lock()
+    err := page.save()
+    w.mu.Unlock()
+
+    if err != nil </span><span class="cov8" title="1">{
+        log.Printf("Error saving page %q: %v", title, err)
+        http.Error(writer, err.Error(), http.StatusInternalServerError)
+        return
+    }</span>
+
+    // Always use StatusFound (302) for redirection after successful POST
+    <span class="cov8" title="1">http.Redirect(writer, request, "/view/"+title, http.StatusFound)</span>
+}
+
+func (w *Wiki) serveDirectory(writer http.ResponseWriter) <span class="cov8" title="1">{
+        w.mu.RLock()
+        defer w.mu.RUnlock()
+
+        var pages []string
+        err := filepath.Walk(getDataDir(), func(path string, info fs.FileInfo, err error) error </span><span class="cov8" title="1">{
+                if err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+                <span class="cov8" title="1">if !info.IsDir() &amp;&amp; strings.HasSuffix(info.Name(), ".md") </span><span class="cov8" title="1">{
+                        if len(pages) &gt;= max_directory_pages </span><span class="cov0" title="0">{
+                                return errors.New("too many pages")
+                        }</span>
+                        <span class="cov8" title="1">pageName := strings.TrimSuffix(info.Name(), ".md")
+                        pages = append(pages, pageName)</span>
+                }
+                <span class="cov8" title="1">return nil</span>
+        })
+
+        <span class="cov8" title="1">if err != nil </span><span class="cov0" title="0">{
+                http.Error(writer, "Error listing directory", http.StatusInternalServerError)
+                return
+        }</span>
+
+        <span class="cov8" title="1">var body strings.Builder
+        body.WriteString(`&lt;h1&gt;Wiki Pages Directory&lt;/h1&gt;`)
+        body.WriteString(`&lt;ul class="page-list"&gt;`)
+        for _, page := range pages </span><span class="cov8" title="1">{
+                body.WriteString(`&lt;li&gt;&lt;a href="/view/` + page + `"&gt;` + page + `&lt;/a&gt;&lt;/li&gt;`)
+        }</span>
+        <span class="cov8" title="1">body.WriteString(`&lt;/ul&gt;`)
+        body.WriteString(`&lt;p&gt;&lt;a href="/view/FrontPage"&gt;Return to FrontPage&lt;/a&gt;&lt;/p&gt;`)
+
+        writer.Write([]byte(body.String()))</span>
+}
+
+func (w *Wiki) renderTemplate(writer http.ResponseWriter, tmpl string, page *Page) <span class="cov8" title="1">{
+        err := w.templates.ExecuteTemplate(writer, tmpl+".html", page)
+        if err != nil </span><span class="cov0" title="0">{
+                http.Error(writer, err.Error(), http.StatusInternalServerError)
+        }</span>
+}
+
+// More restrictive path validation following TigerStyle
+var validPath = regexp.MustCompile(`^/(edit|save|view)/([a-zA-Z][a-zA-Z0-9_-]{0,63})$`)
+
+func (w *Wiki) makeHandler(fn func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc <span class="cov8" title="1">{
+        return func(writer http.ResponseWriter, request *http.Request) </span><span class="cov8" title="1">{
+                matches := validPath.FindStringSubmatch(request.URL.Path)
+                if matches == nil </span><span class="cov8" title="1">{
+                        http.NotFound(writer, request)
+                        return
+                }</span>
+                <span class="cov8" title="1">fn(writer, request, matches[2])</span>
+        }
+}
+
+func main() <span class="cov0" title="0">{
+        // Initialize wiki
+        wiki, err := NewWiki()
+        if err != nil </span><span class="cov0" title="0">{
+                log.Fatal(err)
+        }</span>
+
+        // Setup routes
+        <span class="cov0" title="0">http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) </span><span class="cov0" title="0">{
+                if r.URL.Path != "/" </span><span class="cov0" title="0">{
+                        http.NotFound(w, r)
+                        return
+                }</span>
+                <span class="cov0" title="0">http.Redirect(w, r, "/view/FrontPage", http.StatusFound)</span>
+        })
+        <span class="cov0" title="0">http.HandleFunc("/view/", wiki.makeHandler(wiki.viewHandler))
+        http.HandleFunc("/edit/", wiki.makeHandler(wiki.editHandler))
+        http.HandleFunc("/save/", wiki.makeHandler(wiki.saveHandler))
+
+        port := ":8080"
+        log.Printf("Starting wiki server on %s", port)
+        log.Fatal(http.ListenAndServe(port, nil))</span>
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

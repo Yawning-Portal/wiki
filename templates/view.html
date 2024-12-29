@@ -1,5 +1,98 @@
-<h1>{{.Title}}</h1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - Wiki</title>
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --accent-color: #3498db;
+            --background-color: #f9f9f9;
+            --text-color: #333;
+            --max-width: 800px;
+        }
 
-<p>[<a href="/edit/{{.Title}}">edit</a>]</p>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background: var(--background-color);
+            margin: 0;
+            padding: 20px;
+        }
 
-<div>{{.Body}}</div>
+        .container {
+            max-width: var(--max-width);
+            margin: 0 auto;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .header {
+            border-bottom: 2px solid var(--primary-color);
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        h1 {
+            color: var(--primary-color);
+            margin: 0;
+        }
+
+        .nav {
+            margin-bottom: 20px;
+        }
+
+        .nav a {
+            color: var(--accent-color);
+            text-decoration: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+
+        .nav a:hover {
+            background-color: var(--accent-color);
+            color: white;
+        }
+
+        .content {
+            padding: 20px 0;
+        }
+
+        .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            color: #666;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>{{.Title}}</h1>
+            <div class="nav">
+                <a href="/edit/{{.Title}}">Edit</a>
+                <a href="/view/Directory">Directory</a>
+                <a href="/view/FrontPage">Home</a>
+            </div>
+        </div>
+
+        <div class="content">
+            {{.Body}}
+        </div>
+
+        <div class="footer">
+            <p>Last modified: {{.Modified_at}}</p>
+        </div>
+    </div>
+</body>
+</html>
