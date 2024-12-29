@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Search Wiki</title>
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --accent-color: #3498db;
+            --background-color: #f9f9f9;
+            --text-color: #333;
+            --max-width: 800px;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background: var(--background-color);
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: var(--max-width);
+            margin: 0 auto;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .search-form {
+            margin: 20px 0;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 10px;
+            font-size: 16px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+
+        .search-input:focus {
+            border-color: var(--accent-color);
+            outline: none;
+        }
+
+        .result {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .result-title {
+            color: var(--accent-color);
+            text-decoration: none;
+            font-size: 1.2em;
+            font-weight: bold;
+        }
+
+        .result-snippet {
+            margin: 10px 0;
+            color: #666;
+        }
+
+        .result mark {
+            background-color: #fff3cd;
+            padding: 2px;
+            border-radius: 2px;
+        }
+
+        .no-results {
+            text-align: center;
+            color: #666;
+            margin: 40px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <form class="search-form" action="/search" method="GET">
+            <input
+                type="search"
+                name="q"
+                class="search-input"
+                value="{{.Query}}"
+                placeholder="Search wiki pages..."
+                autofocus>
+        </form>
+
+        {{if .Query}}
+            {{if gt .Count 0}}
+                <div class="results-summary">
+                    Found {{.Count}} {{if eq .Count 1}}result{{else}}results{{end}}
+                    for "{{.Query}}"
+                </div>
+                {{range .Results}}
+                    <div class="result">
+                        <a href="/view/{{.Title}}" class="result-title">{{.Title}}</a>
+                        <div class="result-snippet">{{.Snippet}}</div>
+                    </div>
+                {{end}}
+            {{else}}
+                <div class="no-results">
+                    No results found for "{{.Query}}"
+                </div>
+            {{end}}
+        {{end}}
+    </div>
+</body>
+</html>

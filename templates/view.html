@@ -46,7 +46,8 @@
         }
 
         .nav {
-            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
         }
 
         .nav a {
@@ -62,6 +63,31 @@
             color: white;
         }
 
+        .search-box {
+            margin: 0 20px;
+            flex: 1;
+            max-width: 400px;
+        }
+
+        .search-form {
+            display: flex;
+            gap: 10px;
+        }
+
+        .search-input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+        }
+
         .content {
             padding: 20px 0;
         }
@@ -73,18 +99,52 @@
             color: #666;
             font-size: 0.9em;
         }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>{{.Title}}</h1>
-            <div class="nav">
-                <a href="/edit/{{.Title}}">Edit</a>
-                <a href="/view/Directory">Directory</a>
-                <a href="/view/FrontPage">Home</a>
+
+        .version-info {
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            padding: 10px;
+            margin: 10px 0;
+            font-size: 0.9em;
+            color: #666;
+        }
+
+        .version-nav {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-top: 10px;
+        }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>{{.Title}}</h1>
+                <div class="search-box">
+                    <form action="/search" method="GET" class="search-form">
+                        <input type="search" name="q" class="search-input" placeholder="Search wiki...">
+                        <button type="submit" class="button">Search</button>
+                    </form>
+                </div>
+                <div class="nav">
+                    <a href="/edit/{{.Title}}" class="button">Edit</a>
+                    <a href="/history/{{.Title}}" class="button">History</a>
+                    <a href="/view/Directory" class="button">Directory</a>
+                    <a href="/view/FrontPage" class="button">Home</a>
+                </div>
             </div>
-        </div>
+            {{if .Version}}
+            <div class="version-info">
+                Version: {{.Version}}
+                {{if .Comment}}
+                <br>Comment: {{.Comment}}
+                {{end}}
+                <div class="version-nav">
+                    <a href="/view/{{.Title}}" class="nav">Current Version</a>
+                </div>
+            </div>
+            {{end}}
 
         <div class="content">
             {{.Body}}

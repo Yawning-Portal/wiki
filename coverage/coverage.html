@@ -1,0 +1,900 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>go-wiki: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">go-wiki/wiki.go (36.1%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">no coverage</span>
+				<span class="cov1">low coverage</span>
+				<span class="cov2">*</span>
+				<span class="cov3">*</span>
+				<span class="cov4">*</span>
+				<span class="cov5">*</span>
+				<span class="cov6">*</span>
+				<span class="cov7">*</span>
+				<span class="cov8">*</span>
+				<span class="cov9">*</span>
+				<span class="cov10">high coverage</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package main
+
+import (
+    "encoding/json"
+    "errors"
+        "math"
+    "fmt"
+    "html/template"
+    "log"
+    "net/http"
+    "os"
+    "path/filepath"
+    "regexp"
+    "sort"
+    "strconv"
+    "strings"
+    "sync"
+    "time"
+
+    "github.com/sergi/go-diff/diffmatchpatch"
+    "github.com/yuin/goldmark"
+)
+
+// Constants define our system boundaries
+const (
+    // Maximum size for page content to prevent memory exhaustion
+    max_page_size_bytes = 1 &lt;&lt; 20 // 1MB
+
+    // Maximum number of concurrent requests to prevent resource exhaustion
+    max_concurrent_requests = 100
+
+    // Maximum number of pages to list in directory
+    max_directory_pages = 1000
+
+    // Maximum number of versions to keep per page
+    max_versions_per_page = 1000
+
+    // Default data directory if not specified
+    default_data_dir = "data"
+)
+
+// Common errors
+var (
+    ErrPageTooLarge   = errors.New("page content exceeds maximum allowed size")
+    ErrEmptyTitle     = errors.New("page title cannot be empty")
+    ErrServerBusy     = errors.New("server is at maximum capacity")
+    ErrVersionTooOld  = errors.New("version number is too old")
+    ErrVersionInvalid = errors.New("invalid version number")
+)
+
+// PageVersion represents a specific version of a page
+type PageVersion struct {
+    Content   string    `json:"content"`
+    Timestamp time.Time `json:"timestamp"`
+    Author    string    `json:"author"`
+    Comment   string    `json:"comment"`
+    Size      int64     `json:"size"`
+    Version   int64     `json:"version"`
+}
+
+// Page represents a wiki page with its metadata
+type Page struct {
+    Title       string
+    Body        template.HTML // rendered HTML content
+    RawBody     string       // raw markdown content
+    Size_bytes  int64        // size of raw content
+    Modified_at int64        // unix timestamp
+    Version     int64        // current version number
+    Comment     string       // last change comment
+}
+
+// Search result
+type SearchResult struct {
+    Title     string
+    Snippet   string
+    Relevance float64
+}
+
+// VersionMetadata stores version history information
+type VersionMetadata struct {
+    CurrentVersion int64                  `json:"current_version"`
+    Versions      map[int64]*PageVersion `json:"versions"`
+}
+
+// VersionDiff represents the difference between two versions
+type VersionDiff struct {
+    OldVersion int64
+    NewVersion int64
+    Diffs      []DiffSegment
+}
+
+// DiffSegment represents a segment in a version diff
+type DiffSegment struct {
+    Type     string // "equal", "insert", "delete"
+    Text     string
+    Added    bool
+    Removed  bool
+}
+
+// Assert that the page is valid before any operation
+func (p *Page) validate() error <span class="cov6" title="12">{
+    if p.Title == "" </span><span class="cov0" title="0">{
+        return ErrEmptyTitle
+    }</span>
+    <span class="cov6" title="12">if int64(len(p.RawBody)) &gt; max_page_size_bytes </span><span class="cov1" title="1">{
+        return ErrPageTooLarge
+    }</span>
+    <span class="cov6" title="11">return nil</span>
+}
+
+// getDataDir returns the configured data directory or default
+func getDataDir() string <span class="cov10" title="69">{
+    if dir := os.Getenv("WIKI_DATA_DIR"); dir != "" </span><span class="cov10" title="69">{
+        return dir
+    }</span>
+    <span class="cov0" title="0">return default_data_dir</span>
+}
+
+// Move from Page to Wiki
+func (w *Wiki) savePage(p *Page, comment string) error <span class="cov6" title="12">{
+    if err := p.validate(); err != nil </span><span class="cov1" title="1">{
+        return err
+    }</span>
+
+    // Create version directory structure
+    <span class="cov6" title="11">pageDir := filepath.Join(getDataDir(), "pages", p.Title)
+    if err := os.MkdirAll(pageDir, 0755); err != nil </span><span class="cov0" title="0">{
+        return err
+    }</span>
+
+    // Load or create version metadata
+    <span class="cov6" title="11">metadata, err := loadVersionMetadata(p.Title)
+    if err != nil </span><span class="cov0" title="0">{
+        metadata = &amp;VersionMetadata{
+            Versions: make(map[int64]*PageVersion),
+        }
+    }</span>
+
+    // Create new version
+    <span class="cov6" title="11">newVersion := metadata.CurrentVersion + 1
+    version := &amp;PageVersion{
+        Content:   p.RawBody,
+        Timestamp: time.Now(),
+        Comment:   comment,
+        Size:      p.Size_bytes,
+        Version:   newVersion,
+    }
+
+    // Save version file
+    versionFile := filepath.Join(pageDir, fmt.Sprintf("%d.md", newVersion))
+    if err := os.WriteFile(versionFile, []byte(p.RawBody), 0600); err != nil </span><span class="cov0" title="0">{
+        return err
+    }</span>
+
+    // Update metadata
+    <span class="cov6" title="11">metadata.CurrentVersion = newVersion
+    metadata.Versions[newVersion] = version
+
+    // Save current version
+    currentFile := filepath.Join(getDataDir(), p.Title+".md")
+    if err := os.WriteFile(currentFile, []byte(p.RawBody), 0600); err != nil </span><span class="cov0" title="0">{
+        return err
+    }</span>
+
+    // Save metadata
+    <span class="cov6" title="11">if err := saveVersionMetadata(p.Title, metadata); err != nil </span><span class="cov0" title="0">{
+        return err
+    }</span>
+
+    // Update search index
+    <span class="cov6" title="11">w.pageIndex.Store(p.Title, p.RawBody)
+
+    return nil</span>
+}
+
+// Load a specific version of a page
+func (w *Wiki) loadPageVersion(title string, version int64) (*Page, error) <span class="cov5" title="8">{
+    if title == "" </span><span class="cov0" title="0">{
+        return nil, ErrEmptyTitle
+    }</span>
+
+    <span class="cov5" title="8">metadata, err := loadVersionMetadata(title)
+    if err != nil </span><span class="cov0" title="0">{
+        return nil, err
+    }</span>
+
+    <span class="cov5" title="8">var content []byte
+    if version &lt;= 0 || version == metadata.CurrentVersion </span><span class="cov5" title="8">{
+        // Load current version
+        content, err = os.ReadFile(filepath.Join(getDataDir(), title+".md"))
+    }</span> else<span class="cov0" title="0"> {
+        if version &gt; metadata.CurrentVersion </span><span class="cov0" title="0">{
+            return nil, ErrVersionInvalid
+        }</span>
+        // Load specific version
+        <span class="cov0" title="0">versionFile := filepath.Join(getDataDir(), "pages", title, fmt.Sprintf("%d.md", version))
+        content, err = os.ReadFile(versionFile)</span>
+    }
+    <span class="cov5" title="8">if err != nil </span><span class="cov0" title="0">{
+        return nil, err
+    }</span>
+
+    // Check size bounds
+    <span class="cov5" title="8">if len(content) &gt; max_page_size_bytes </span><span class="cov0" title="0">{
+        return nil, ErrPageTooLarge
+    }</span>
+
+    // Convert markdown to HTML
+    <span class="cov5" title="8">var html_body strings.Builder
+    if err := goldmark.Convert(content, &amp;html_body); err != nil </span><span class="cov0" title="0">{
+        return nil, err
+    }</span>
+
+    <span class="cov5" title="8">page := &amp;Page{
+        Title:      title,
+        Body:       template.HTML(html_body.String()),
+        RawBody:    string(content),
+        Size_bytes: int64(len(content)),
+        Version:    version,
+    }
+
+    if v, ok := metadata.Versions[version]; ok </span><span class="cov0" title="0">{
+        page.Comment = v.Comment
+        page.Modified_at = v.Timestamp.Unix()
+    }</span>
+
+    // Update search index with current version only
+    <span class="cov5" title="8">if version &lt;= 0 || version == metadata.CurrentVersion </span><span class="cov5" title="8">{
+        w.pageIndex.Store(title, string(content))
+    }</span>
+
+    <span class="cov5" title="8">return page, nil</span>
+}
+
+// Get version history for a page
+func getPageHistory(title string) ([]*PageVersion, error) <span class="cov0" title="0">{
+    metadata, err := loadVersionMetadata(title)
+    if err != nil </span><span class="cov0" title="0">{
+        return nil, err
+    }</span>
+
+    <span class="cov0" title="0">history := make([]*PageVersion, 0, len(metadata.Versions))
+    for _, version := range metadata.Versions </span><span class="cov0" title="0">{
+        history = append(history, version)
+    }</span>
+
+    // Sort by version number descending
+    <span class="cov0" title="0">sort.Slice(history, func(i, j int) bool </span><span class="cov0" title="0">{
+        return history[i].Version &gt; history[j].Version
+    }</span>)
+
+    <span class="cov0" title="0">return history, nil</span>
+}
+
+// Compare two versions and generate diff
+func (w *Wiki) compareVersions(title string, oldVersion, newVersion int64) (*VersionDiff, error) <span class="cov0" title="0">{
+    oldPage, err := w.loadPageVersion(title, oldVersion)
+    if err != nil </span><span class="cov0" title="0">{
+        return nil, err
+    }</span>
+
+    <span class="cov0" title="0">newPage, err := w.loadPageVersion(title, newVersion)
+    if err != nil </span><span class="cov0" title="0">{
+        return nil, err
+    }</span>
+
+    <span class="cov0" title="0">dmp := diffmatchpatch.New()
+    diffs := dmp.DiffMain(oldPage.RawBody, newPage.RawBody, true)
+
+    segments := make([]DiffSegment, len(diffs))
+    for i, diff := range diffs </span><span class="cov0" title="0">{
+        segments[i] = DiffSegment{Text: diff.Text}
+        switch diff.Type </span>{
+        case diffmatchpatch.DiffEqual:<span class="cov0" title="0">
+            segments[i].Type = "equal"</span>
+        case diffmatchpatch.DiffInsert:<span class="cov0" title="0">
+            segments[i].Type = "insert"
+            segments[i].Added = true</span>
+        case diffmatchpatch.DiffDelete:<span class="cov0" title="0">
+            segments[i].Type = "delete"
+            segments[i].Removed = true</span>
+        }
+    }
+
+    <span class="cov0" title="0">return &amp;VersionDiff{
+        OldVersion: oldVersion,
+        NewVersion: newVersion,
+        Diffs:      segments,
+    }, nil</span>
+}
+
+// Restore a specific version
+func (w *Wiki) restoreVersion(title string, version int64) error <span class="cov0" title="0">{
+    oldPage, err := w.loadPageVersion(title, version)
+    if err != nil </span><span class="cov0" title="0">{
+        return err
+    }</span>
+
+    <span class="cov0" title="0">page := &amp;Page{
+        Title:      title,
+        RawBody:    oldPage.RawBody,
+        Size_bytes: oldPage.Size_bytes,
+    }
+
+    comment := fmt.Sprintf("Restored from version %d", version)
+    return w.savePage(page, comment)</span>
+}
+
+// Helper functions for metadata
+func loadVersionMetadata(title string) (*VersionMetadata, error) <span class="cov7" title="19">{
+    metadataFile := filepath.Join(getDataDir(), "pages", title, "metadata.json")
+    data, err := os.ReadFile(metadataFile)
+    if err != nil </span><span class="cov4" title="6">{
+        if os.IsNotExist(err) </span><span class="cov4" title="6">{
+            return &amp;VersionMetadata{Versions: make(map[int64]*PageVersion)}, nil
+        }</span>
+        <span class="cov0" title="0">return nil, err</span>
+    }
+
+    <span class="cov6" title="13">var metadata VersionMetadata
+    if err := json.Unmarshal(data, &amp;metadata); err != nil </span><span class="cov0" title="0">{
+        return nil, err
+    }</span>
+    <span class="cov6" title="13">return &amp;metadata, nil</span>
+}
+
+func saveVersionMetadata(title string, metadata *VersionMetadata) error <span class="cov6" title="11">{
+    metadataFile := filepath.Join(getDataDir(), "pages", title, "metadata.json")
+    data, err := json.MarshalIndent(metadata, "", "    ")
+    if err != nil </span><span class="cov0" title="0">{
+        return err
+    }</span>
+    <span class="cov6" title="11">return os.WriteFile(metadataFile, data, 0600)</span>
+}
+
+// RequestLimiter implements a concurrent request limiter
+type RequestLimiter struct {
+    semaphore chan struct{}
+}
+
+func NewRequestLimiter() *RequestLimiter <span class="cov3" title="4">{
+    return &amp;RequestLimiter{
+        semaphore: make(chan struct{}, max_concurrent_requests),
+    }
+}</span>
+
+func (l *RequestLimiter) Acquire() error <span class="cov6" title="14">{
+    select </span>{
+    case l.semaphore &lt;- struct{}{}:<span class="cov6" title="14">
+        return nil</span>
+    default:<span class="cov0" title="0">
+        return ErrServerBusy</span>
+    }
+}
+
+func (l *RequestLimiter) Release() <span class="cov6" title="14">{
+    &lt;-l.semaphore
+}</span>
+
+// Wiki represents our application state
+type Wiki struct {
+    templates *template.Template
+    limiter   *RequestLimiter
+    mu        sync.RWMutex // Protects concurrent page operations
+        pageIndex sync.Map     // Used for search functionality, stores page content in memory
+}
+
+func (w *Wiki) initializeSearchIndex() error <span class="cov3" title="4">{
+    // Scan the data directory for all pages
+    baseDir := getDataDir()
+    files, err := os.ReadDir(baseDir)
+    if err != nil </span><span class="cov0" title="0">{
+        return err
+    }</span>
+
+    <span class="cov3" title="4">for _, file := range files </span><span class="cov3" title="4">{
+        // Only process .md files
+        if !file.IsDir() &amp;&amp; strings.HasSuffix(file.Name(), ".md") </span><span class="cov0" title="0">{
+            pageName := strings.TrimSuffix(file.Name(), ".md")
+            content, err := os.ReadFile(filepath.Join(baseDir, file.Name()))
+            if err != nil </span><span class="cov0" title="0">{
+                log.Printf("Error reading %s: %v", file.Name(), err)
+                continue</span>
+            }
+            <span class="cov0" title="0">w.pageIndex.Store(pageName, string(content))
+            log.Printf("Indexed page: %s", pageName)</span>
+        }
+    }
+
+    <span class="cov3" title="4">return nil</span>
+}
+
+func NewWiki() (*Wiki, error) <span class="cov3" title="4">{
+    // Ensure data directory exists
+    dataDir := getDataDir()
+    if err := os.MkdirAll(filepath.Join(dataDir, "pages"), 0755); err != nil </span><span class="cov0" title="0">{
+        return nil, err
+    }</span>
+
+    // Load templates
+    <span class="cov3" title="4">templates, err := template.ParseGlob("templates/*.html")
+    if err != nil </span><span class="cov0" title="0">{
+        return nil, err
+    }</span>
+
+    <span class="cov3" title="4">wiki := &amp;Wiki{
+        templates: templates,
+        limiter:   NewRequestLimiter(),
+    }
+
+    // Initialize search index
+    if err := wiki.initializeSearchIndex(); err != nil </span><span class="cov0" title="0">{
+        return nil, err
+    }</span>
+
+    <span class="cov3" title="4">return wiki, nil</span>
+}
+
+// HTTP Handlers
+
+func (w *Wiki) viewHandler(writer http.ResponseWriter, request *http.Request, title string) <span class="cov5" title="8">{
+    if err := w.limiter.Acquire(); err != nil </span><span class="cov0" title="0">{
+        http.Error(writer, err.Error(), http.StatusServiceUnavailable)
+        return
+    }</span>
+    <span class="cov5" title="8">defer w.limiter.Release()
+
+    if title == "Directory" </span><span class="cov0" title="0">{
+        w.serveDirectory(writer)
+        return
+    }</span>
+
+    <span class="cov5" title="8">version := int64(0)
+    if v := request.URL.Query().Get("version"); v != "" </span><span class="cov0" title="0">{
+        var err error
+        version, err = strconv.ParseInt(v, 10, 64)
+        if err != nil </span><span class="cov0" title="0">{
+            http.Error(writer, "Invalid version number", http.StatusBadRequest)
+            return
+        }</span>
+    }
+
+    <span class="cov5" title="8">w.mu.RLock()
+    page, err := w.loadPageVersion(title, version)
+    w.mu.RUnlock()
+
+    if err != nil </span><span class="cov0" title="0">{
+        if os.IsNotExist(err) </span><span class="cov0" title="0">{
+            http.Redirect(writer, request, "/edit/"+title, http.StatusFound)
+            return
+        }</span>
+        <span class="cov0" title="0">http.Error(writer, err.Error(), http.StatusInternalServerError)
+        return</span>
+    }
+
+    <span class="cov5" title="8">w.renderTemplate(writer, "view", page)</span>
+}
+
+func (w *Wiki) editHandler(writer http.ResponseWriter, request *http.Request, title string) <span class="cov0" title="0">{
+    if err := w.limiter.Acquire(); err != nil </span><span class="cov0" title="0">{
+        http.Error(writer, err.Error(), http.StatusServiceUnavailable)
+        return
+    }</span>
+    <span class="cov0" title="0">defer w.limiter.Release()
+
+    w.mu.RLock()
+    page, err := w.loadPageVersion(title, 0)
+    w.mu.RUnlock()
+
+    if err != nil &amp;&amp; !os.IsNotExist(err) </span><span class="cov0" title="0">{
+        http.Error(writer, err.Error(), http.StatusInternalServerError)
+        return
+    }</span>
+
+    <span class="cov0" title="0">if err != nil </span><span class="cov0" title="0">{
+        page = &amp;Page{Title: title}
+    }</span>
+
+    <span class="cov0" title="0">w.renderTemplate(writer, "edit", page)</span>
+}
+
+func (w *Wiki) saveHandler(writer http.ResponseWriter, request *http.Request, title string) <span class="cov4" title="6">{
+    if request.Method != http.MethodPost </span><span class="cov0" title="0">{
+        http.Error(writer, "Method not allowed", http.StatusMethodNotAllowed)
+        return
+    }</span>
+
+    <span class="cov4" title="6">if err := w.limiter.Acquire(); err != nil </span><span class="cov0" title="0">{
+        http.Error(writer, err.Error(), http.StatusServiceUnavailable)
+        return
+    }</span>
+    <span class="cov4" title="6">defer w.limiter.Release()
+
+    if err := request.ParseForm(); err != nil </span><span class="cov0" title="0">{
+        http.Error(writer, err.Error(), http.StatusBadRequest)
+        return
+    }</span>
+
+    <span class="cov4" title="6">body := request.FormValue("body")
+    comment := request.FormValue("comment")
+    page := &amp;Page{Title: title, RawBody: body}
+
+    w.mu.Lock()
+    err := w.savePage(page, comment)
+    w.mu.Unlock()
+
+    if err != nil </span><span class="cov1" title="1">{
+        http.Error(writer, err.Error(), http.StatusInternalServerError)
+        return
+    }</span>
+
+    <span class="cov4" title="5">http.Redirect(writer, request, "/view/"+title, http.StatusFound)</span>
+}
+
+func (w *Wiki) historyHandler(writer http.ResponseWriter, request *http.Request, title string) <span class="cov0" title="0">{
+    if err := w.limiter.Acquire(); err != nil </span><span class="cov0" title="0">{
+        http.Error(writer, err.Error(), http.StatusServiceUnavailable)
+        return
+    }</span>
+    <span class="cov0" title="0">defer w.limiter.Release()
+
+    w.mu.RLock()
+    history, err := getPageHistory(title)
+    w.mu.RUnlock()
+
+    if err != nil </span><span class="cov0" title="0">{
+        http.Error(writer, err.Error(), http.StatusInternalServerError)
+        return
+    }</span>
+
+    <span class="cov0" title="0">data := struct {
+        Title   string
+        History []*PageVersion
+    }{title, history}
+
+    w.renderTemplate(writer, "history", data)</span>
+}
+
+func (w *Wiki) diffHandler(writer http.ResponseWriter, request *http.Request, title string) <span class="cov0" title="0">{
+    if err := w.limiter.Acquire(); err != nil </span><span class="cov0" title="0">{
+        http.Error(writer, err.Error(), http.StatusServiceUnavailable)
+        return
+    }</span>
+    <span class="cov0" title="0">defer w.limiter.Release()
+
+    oldVersion, err := strconv.ParseInt(request.URL.Query().Get("old"), 10, 64)
+    if err != nil </span><span class="cov0" title="0">{
+        http.Error(writer, "Invalid old version", http.StatusBadRequest)
+        return
+    }</span>
+
+    <span class="cov0" title="0">newVersion, err := strconv.ParseInt(request.URL.Query().Get("new"), 10, 64)
+    if err != nil </span><span class="cov0" title="0">{
+        http.Error(writer, "Invalid new version", http.StatusBadRequest)
+        return
+    }</span>
+
+    <span class="cov0" title="0">w.mu.RLock()
+    diff, err := w.compareVersions(title, oldVersion, newVersion)
+    w.mu.RUnlock()
+
+    if err != nil </span><span class="cov0" title="0">{
+        http.Error(writer, err.Error(), http.StatusInternalServerError)
+        return
+    }</span>
+
+    <span class="cov0" title="0">data := struct {
+        Title string
+        Diff  *VersionDiff
+    }{title, diff}
+
+    w.renderTemplate(writer, "diff", data)</span>
+}
+
+func (w *Wiki) restoreHandler(writer http.ResponseWriter, request *http.Request, title string) <span class="cov0" title="0">{
+    if request.Method != http.MethodPost </span><span class="cov0" title="0">{
+        http.Error(writer, "Method not allowed", http.StatusMethodNotAllowed)
+        return
+    }</span>
+
+    <span class="cov0" title="0">if err := w.limiter.Acquire(); err != nil </span><span class="cov0" title="0">{
+        http.Error(writer, err.Error(), http.StatusServiceUnavailable)
+        return
+    }</span>
+    <span class="cov0" title="0">defer w.limiter.Release()
+
+    version, err := strconv.ParseInt(request.URL.Query().Get("version"), 10, 64)
+    if err != nil </span><span class="cov0" title="0">{
+        http.Error(writer, "Invalid version", http.StatusBadRequest)
+        return
+    }</span>
+
+    <span class="cov0" title="0">w.mu.Lock()
+    err = w.restoreVersion(title, version)
+    w.mu.Unlock()
+
+    if err != nil </span><span class="cov0" title="0">{
+        http.Error(writer, err.Error(), http.StatusInternalServerError)
+        return
+    }</span>
+
+    <span class="cov0" title="0">http.Redirect(writer, request, "/view/"+title, http.StatusFound)</span>
+}
+
+func (w *Wiki) serveDirectory(writer http.ResponseWriter) <span class="cov1" title="1">{
+    w.mu.RLock()
+    defer w.mu.RUnlock()
+
+    pages := make(map[string]bool) // Use map to avoid duplicates
+    baseDir := getDataDir()
+
+    // Debug: print the directory we're scanning
+    log.Printf("Scanning directory: %s", baseDir)
+
+    files, err := os.ReadDir(baseDir)
+    if err != nil </span><span class="cov0" title="0">{
+        log.Printf("Error reading directory: %v", err)
+        http.Error(writer, err.Error(), http.StatusInternalServerError)
+        return
+    }</span>
+
+    <span class="cov1" title="1">for _, file := range files </span><span class="cov3" title="4">{
+        // Skip directories and non-.md files
+        name := file.Name()
+        if file.IsDir() || !strings.HasSuffix(name, ".md") </span><span class="cov1" title="1">{
+            continue</span>
+        }
+
+        <span class="cov3" title="3">pageName := strings.TrimSuffix(name, ".md")
+        pages[pageName] = true
+        log.Printf("Found page: %s", pageName)
+
+        if len(pages) &gt;= max_directory_pages </span><span class="cov0" title="0">{
+            http.Error(writer, "too many pages", http.StatusInternalServerError)
+            return
+        }</span>
+    }
+
+    // Convert map to sorted slice
+    <span class="cov1" title="1">pageList := make([]string, 0, len(pages))
+    for page := range pages </span><span class="cov3" title="3">{
+        pageList = append(pageList, page)
+    }</span>
+    <span class="cov1" title="1">sort.Strings(pageList)
+
+    log.Printf("Final page list: %v", pageList)
+
+    data := struct {
+        Pages []string
+    }{pageList}
+
+    w.renderTemplate(writer, "directory", data)</span>
+}
+
+func (w *Wiki) renderTemplate(writer http.ResponseWriter, tmpl string, data interface{}) <span class="cov5" title="9">{
+    err := w.templates.ExecuteTemplate(writer, tmpl+".html", data)
+    if err != nil </span><span class="cov0" title="0">{
+        http.Error(writer, err.Error(), http.StatusInternalServerError)
+    }</span>
+}
+
+// More restrictive path validation following TigerStyle
+var validPath = regexp.MustCompile(`^/(edit|save|view|history|diff|restore)/([a-zA-Z][a-zA-Z0-9_-]{0,63})$`)
+
+func (w *Wiki) makeHandler(fn func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc <span class="cov6" title="15">{
+    return func(writer http.ResponseWriter, request *http.Request) </span><span class="cov6" title="15">{
+        matches := validPath.FindStringSubmatch(request.URL.Path)
+        if matches == nil </span><span class="cov1" title="1">{
+            http.NotFound(writer, request)
+            return
+        }</span>
+        <span class="cov6" title="14">fn(writer, request, matches[2])</span>
+    }
+}
+
+func (w *Wiki) searchHandler(writer http.ResponseWriter, request *http.Request) <span class="cov0" title="0">{
+    if err := w.limiter.Acquire(); err != nil </span><span class="cov0" title="0">{
+        http.Error(writer, err.Error(), http.StatusServiceUnavailable)
+        return
+    }</span>
+    <span class="cov0" title="0">defer w.limiter.Release()
+
+    query := request.URL.Query().Get("q")
+    if query == "" </span><span class="cov0" title="0">{
+        w.renderTemplate(writer, "search", nil)
+        return
+    }</span>
+
+    <span class="cov0" title="0">w.mu.RLock()
+    results := w.searchPages(query)
+    w.mu.RUnlock()
+
+    data := struct {
+        Query    string
+        Results  []SearchResult
+        Count    int
+    }{
+        Query:    query,
+        Results:  results,
+        Count:    len(results),
+    }
+
+    w.renderTemplate(writer, "search", data)</span>
+}
+
+func (w *Wiki) searchPages(query string) []SearchResult <span class="cov0" title="0">{
+    query = strings.ToLower(query)
+    var results []SearchResult
+
+    w.pageIndex.Range(func(key, value interface{}) bool </span><span class="cov0" title="0">{
+        title := key.(string)
+        content := value.(string)
+
+        // Simple relevance scoring based on title and content matches
+        relevance := 0.0
+
+        titleLower := strings.ToLower(title)
+        // Exact title match gets highest score
+        if titleLower == query </span><span class="cov0" title="0">{
+            relevance += 5.0
+        }</span> else<span class="cov0" title="0"> if strings.Contains(titleLower, query) </span><span class="cov0" title="0">{
+            relevance += 2.0
+        }</span>
+
+        // Content matches
+        <span class="cov0" title="0">contentLower := strings.ToLower(content)
+        if strings.Contains(contentLower, query) </span><span class="cov0" title="0">{
+            relevance += 1.0
+
+            // Create a snippet of the matching content
+            index := strings.Index(contentLower, query)
+            start := math.Max(0, float64(index-50))
+            end := math.Min(float64(len(content)), float64(index+len(query)+50))
+
+            snippet := content[int(start):int(end)]
+            if start &gt; 0 </span><span class="cov0" title="0">{
+                snippet = "..." + snippet
+            }</span>
+            <span class="cov0" title="0">if end &lt; float64(len(content)) </span><span class="cov0" title="0">{
+                snippet = snippet + "..."
+            }</span>
+
+            <span class="cov0" title="0">if relevance &gt; 0 </span><span class="cov0" title="0">{
+                results = append(results, SearchResult{
+                    Title:     title,
+                    Snippet:   snippet,
+                    Relevance: relevance,
+                })
+            }</span>
+        }
+        <span class="cov0" title="0">return true</span>
+    })
+
+    // Sort results by relevance
+    <span class="cov0" title="0">sort.Slice(results, func(i, j int) bool </span><span class="cov0" title="0">{
+        return results[i].Relevance &gt; results[j].Relevance
+    }</span>)
+
+    <span class="cov0" title="0">return results</span>
+}
+
+func main() <span class="cov0" title="0">{
+    // Initialize wiki
+    wiki, err := NewWiki()
+    if err != nil </span><span class="cov0" title="0">{
+        log.Fatal(err)
+    }</span>
+
+    // Setup routes
+    <span class="cov0" title="0">http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) </span><span class="cov0" title="0">{
+        if r.URL.Path != "/" </span><span class="cov0" title="0">{
+            http.NotFound(w, r)
+            return
+        }</span>
+        <span class="cov0" title="0">http.Redirect(w, r, "/view/FrontPage", http.StatusFound)</span>
+    })
+    <span class="cov0" title="0">http.HandleFunc("/view/", wiki.makeHandler(wiki.viewHandler))
+    http.HandleFunc("/edit/", wiki.makeHandler(wiki.editHandler))
+    http.HandleFunc("/save/", wiki.makeHandler(wiki.saveHandler))
+    http.HandleFunc("/history/", wiki.makeHandler(wiki.historyHandler))
+    http.HandleFunc("/diff/", wiki.makeHandler(wiki.diffHandler))
+    http.HandleFunc("/restore/", wiki.makeHandler(wiki.restoreHandler))
+        http.HandleFunc("/search", wiki.searchHandler)
+
+    port := ":8080"
+    log.Printf("Starting wiki server on %s", port)
+    log.Fatal(http.ListenAndServe(port, nil))</span>
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

@@ -55,36 +55,41 @@ func newTestHelper(t *testing.T) *TestHelper {
         t.Fatalf("failed to create wiki: %v", err)
     }
 
-    // Debug handler that wraps all requests
-    debugHandler := func(w http.ResponseWriter, r *http.Request) {
-        t.Logf("Handling %s request to %s", r.Method, r.URL.Path)
+	// Debug handler that wraps all requests
+	debugHandler := func(w http.ResponseWriter, r *http.Request) {
+		t.Logf("Handling %s request to %s", r.Method, r.URL.Path)
 
-        // Use the same routing logic as main()
-        switch {
-        case r.URL.Path == "/":
-            http.Redirect(w, r, "/view/FrontPage", http.StatusFound)
+		// Use the same routing logic as main()
+		switch {
+		case r.URL.Path == "/":
+			http.Redirect(w, r, "/view/FrontPage", http.StatusFound)
 
-        case strings.HasPrefix(r.URL.Path, "/save/"):
-            if r.Method != "POST" {
-                t.Logf("Method not allowed: %s", r.Method)
-                http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-                return
-            }
-            wiki.makeHandler(wiki.saveHandler).ServeHTTP(w, r)
+		case strings.HasPrefix(r.URL.Path, "/save/"):
+			if r.Method != "POST" {
+				t.Logf("Method not allowed: %s", r.Method)
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			wiki.makeHandler(wiki.saveHandler).ServeHTTP(w, r)
 
-        case strings.HasPrefix(r.URL.Path, "/view/"):
-            wiki.makeHandler(wiki.viewHandler).ServeHTTP(w, r)
+		case strings.HasPrefix(r.URL.Path, "/view/"):
+			// Check for Directory specifically
+			if strings.HasSuffix(r.URL.Path, "Directory") {
+				wiki.serveDirectory(w)
+				return
+			}
+			wiki.makeHandler(wiki.viewHandler).ServeHTTP(w, r)
 
-        case strings.HasPrefix(r.URL.Path, "/edit/"):
-            wiki.makeHandler(wiki.editHandler).ServeHTTP(w, r)
+		case strings.HasPrefix(r.URL.Path, "/edit/"):
+			wiki.makeHandler(wiki.editHandler).ServeHTTP(w, r)
 
-        default:
-            t.Logf("Not found: %s", r.URL.Path)
-            http.NotFound(w, r)
-        }
-    }
+		default:
+			t.Logf("Not found: %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}
 
-    server := httptest.NewServer(http.HandlerFunc(debugHandler))
+	server := httptest.NewServer(http.HandlerFunc(debugHandler))
 
     return &TestHelper{
         t:       t,
@@ -100,15 +105,20 @@ func (h *TestHelper) cleanup() {
 }
 
 func (h *TestHelper) createTestPage(title, content string) {
-	h.t.Helper()
-	h.mutex.Lock()
-	defer h.mutex.Unlock()
+    h.t.Helper()
+    h.mutex.Lock()
+    defer h.mutex.Unlock()
 
-	filename := filepath.Join(h.tempDir, "data", title+".md")
-	err := os.WriteFile(filename, []byte(content), 0600)
-	if err != nil {
-		h.t.Fatalf("failed to create test page: %v", err)
-	}
+    page := &Page{
+        Title:      title,
+        RawBody:    content,
+        Size_bytes: int64(len(content)),
+    }
+
+    err := h.wiki.savePage(page, "Test page creation")
+    if err != nil {
+        h.t.Fatalf("failed to create test page: %v", err)
+    }
 }
 
 func (h *TestHelper) assertPageContent(title, expectedContent string) {

@@ -87,6 +87,45 @@
             background-color: #7f8c8d;
         }
 
+        .header {
+            border-bottom: 2px solid var(--primary-color);
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .nav {
+            display: flex;
+            gap: 10px;
+        }
+
+        .nav a {
+            color: var(--accent-color);
+            text-decoration: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+
+        .nav a:hover {
+            background-color: var(--accent-color);
+            color: white;
+        }
+
+        .change-comment {
+            margin-top: 20px;
+        }
+
+        .change-comment input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
         .markdown-help {
             margin-top: 10px;
             padding: 10px;
@@ -114,6 +153,14 @@
                 placeholder="Enter your content here using Markdown..."
                 spellcheck="true"
                 autofocus>{{.RawBody}}</textarea>
+
+            <div class="change-comment">
+                <input
+                    type="text"
+                    name="comment"
+                    placeholder="Describe your changes (optional)"
+                    value="{{.Comment}}">
+            </div>
 
             <div class="button-group">
                 <button type="submit" class="button button-primary">Save Changes</button>

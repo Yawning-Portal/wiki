@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Compare Versions: {{.Title}} - Wiki</title>
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --accent-color: #3498db;
+            --background-color: #f9f9f9;
+            --text-color: #333;
+            --max-width: 800px;
+            --added-color: #e6ffec;
+            --removed-color: #ffebe9;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background: var(--background-color);
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: var(--max-width);
+            margin: 0 auto;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .header {
+            border-bottom: 2px solid var(--primary-color);
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        h1 {
+            color: var(--primary-color);
+            margin: 0;
+        }
+
+        .nav {
+            display: flex;
+            gap: 10px;
+        }
+
+        .nav a {
+            color: var(--accent-color);
+            text-decoration: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+
+        .nav a:hover {
+            background-color: var(--accent-color);
+            color: white;
+        }
+
+        .version-info {
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 20px 0;
+            font-size: 0.9em;
+        }
+
+        .diff-content {
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            padding: 20px;
+            border: 1px solid #eee;
+            border-radius: 4px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .diff-line {
+            padding: 2px 0;
+            margin: 2px 0;
+        }
+
+        .diff-added {
+            background-color: var(--added-color);
+            color: #1a7f37;
+        }
+
+        .diff-removed {
+            background-color: var(--removed-color);
+            color: #cf222e;
+            text-decoration: none;
+        }
+
+        .diff-unchanged {
+            color: #24292f;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Compare Versions: {{.Title}}</h1>
+            <div class="nav">
+                <a href="/history/{{.Title}}">Back to History</a>
+                <a href="/view/{{.Title}}">View Current</a>
+                <a href="/view/Directory">Directory</a>
+            </div>
+        </div>
+
+        <div class="version-info">
+            Comparing Version {{.Diff.OldVersion}} with Version {{.Diff.NewVersion}}
+        </div>
+
+        <div class="diff-content">
+            {{range .Diff.Diffs}}
+                {{if eq .Type "equal"}}
+                    <div class="diff-line diff-unchanged">{{.Text}}</div>
+                {{else if eq .Type "insert"}}
+                    <div class="diff-line diff-added">+ {{.Text}}</div>
+                {{else if eq .Type "delete"}}
+                    <div class="diff-line diff-removed">- {{.Text}}</div>
+                {{end}}
+            {{end}}
+        </div>
+    </div>
+</body>
+</html>
