@@ -1,1 +1,0 @@
-Nico is a student at **[UW-Madison](UW-Madison)**! 
