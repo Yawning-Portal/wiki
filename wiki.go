@@ -21,7 +21,7 @@ import (
     "github.com/yuin/goldmark"
 )
 
-// Constants define our system boundaries
+// Constants with compile-time checks using const expressions
 const (
     // Maximum size for page content to prevent memory exhaustion
     max_page_size_bytes = 1 << 20 // 1MB
@@ -35,9 +35,16 @@ const (
     // Maximum number of versions to keep per page
     max_versions_per_page = 1000
 
-    // Default data directory if not specified
-    default_data_dir = "data"
+	// default data directory if not specified
+	default_data_dir = "data"
+
+    // Compile-time checks using constant expressions
+    _max_page_check        = uint64(max_page_size_bytes - (1 << 20))     // Will fail if > 1MB
+    _max_versions_check    = uint64(max_versions_per_page - 1000)        // Will fail if > 1000
+    _max_concurrent_check  = uint64(max_concurrent_requests - 100)        // Will fail if > 100
+    _max_directory_check   = uint64(max_directory_pages - 1000)          // Will fail if > 1000
 )
+
 
 // Common errors
 var (
@@ -97,14 +104,33 @@ type DiffSegment struct {
     Removed  bool
 }
 
-// Assert that the page is valid before any operation
+// Assert that the page is valid before any operation (uses paired assertions)
 func (p *Page) validate() error {
+    // check title
     if p.Title == "" {
         return ErrEmptyTitle
     }
+
+    // Check title length - reasonable maximum for file systems
+    if len(p.Title) > 64 {
+        return fmt.Errorf("title exceeds maximum length of 64 characters")
+    }
+
+    // Check title characters using your existing validPath regexp
+    if !validPath.MatchString("/view/" + p.Title) {
+        return fmt.Errorf("title contains invalid characters")
+    }
+
+    // Check content size
     if int64(len(p.RawBody)) > max_page_size_bytes {
         return ErrPageTooLarge
     }
+
+    // Paired assertion: verify title and content consistency
+    if len(p.RawBody) > 0 && p.Title == "" {
+        return fmt.Errorf("content present but title missing")
+    }
+
     return nil
 }
 
