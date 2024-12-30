@@ -212,6 +212,8 @@ func (w *Wiki) savePage(p *Page, comment string) error {
         }
     }
 
+	p.Modified_at = time.Now().Unix()
+
     // Create new version
     newVersion := metadata.CurrentVersion + 1
     version := &PageVersion{
@@ -249,7 +251,6 @@ func (w *Wiki) savePage(p *Page, comment string) error {
     return nil
 }
 
-// Load a specific version of a page
 func (w *Wiki) loadPageVersion(title string, version int64) (*Page, error) {
     if title == "" {
         return nil, ErrEmptyTitle
@@ -300,11 +301,12 @@ func (w *Wiki) loadPageVersion(title string, version int64) (*Page, error) {
         RawBody:    string(content),
         Size_bytes: int64(len(content)),
         Version:    version,
+        Modified_at: time.Now().Unix(), // Add this line
     }
 
     if v, ok := metadata.Versions[version]; ok {
         page.Comment = v.Comment
-        page.Modified_at = v.Timestamp.Unix()
+        // Don't override Modified_at from metadata since we want cache to be fresh
     }
 
     // Update search index and cache with current version only
