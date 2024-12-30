@@ -1,4 +1,4 @@
-# 📚✍ Go Wiki
+# 📚 Go Wiki
 
 A lightweight, safety-focused wiki engine written in Go, designed to be simple, fast, and intuitive.
 
