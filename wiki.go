@@ -35,6 +35,13 @@ const (
     // Maximum number of versions to keep per page
     max_versions_per_page = 1000
 
+	// 1 second cache TTL
+	page_cache_ttl_ms = 1000
+
+	max_batch_size = 10
+
+	batch_timeout_ms = 100
+
 	// default data directory if not specified
 	default_data_dir = "data"
 
@@ -76,6 +83,11 @@ type Page struct {
     Comment     string       // last change comment
 }
 
+type PageCache struct {
+    cache sync.Map  // map[string]*Page
+}
+
+
 // Search result
 type SearchResult struct {
     Title     string
@@ -102,6 +114,44 @@ type DiffSegment struct {
     Text     string
     Added    bool
     Removed  bool
+}
+
+// BatchOperation represents a pending page operation
+type BatchOperation struct {
+    Page    *Page
+    Comment string
+    Done    chan error // Signal completion to caller
+}
+
+// Read batching
+type ReadOperation struct {
+    Title   string
+    Version int64
+    Done    chan ReadResult
+}
+
+type ReadResult struct {
+    Page *Page
+    Err  error
+}
+
+// Batch processing metrics
+type BatchMetrics struct {
+    Processed  int64
+    Errors     int64
+    BatchesFull int64
+    BatchesPartial int64
+}
+
+// PageBatcher handles batched page operations
+type PageBatcher struct {
+    operations chan BatchOperation
+    readOps    chan ReadOperation
+    maxBatch   int
+    timeout    time.Duration
+    wiki       *Wiki
+    metrics    BatchMetrics
+    mu         sync.RWMutex
 }
 
 // Assert that the page is valid before any operation (uses paired assertions)
@@ -205,6 +255,13 @@ func (w *Wiki) loadPageVersion(title string, version int64) (*Page, error) {
         return nil, ErrEmptyTitle
     }
 
+    // Try cache first for current versions
+    if version == 0 {
+        if cached, ok := w.pageCache.get(title); ok {
+            return cached, nil
+        }
+    }
+
     metadata, err := loadVersionMetadata(title)
     if err != nil {
         return nil, err
@@ -250,9 +307,10 @@ func (w *Wiki) loadPageVersion(title string, version int64) (*Page, error) {
         page.Modified_at = v.Timestamp.Unix()
     }
 
-    // Update search index with current version only
+    // Update search index and cache with current version only
     if version <= 0 || version == metadata.CurrentVersion {
         w.pageIndex.Store(title, string(content))
+        w.pageCache.set(page)
     }
 
     return page, nil
@@ -387,8 +445,10 @@ func (l *RequestLimiter) Release() {
 type Wiki struct {
     templates *template.Template
     limiter   *RequestLimiter
-    mu        sync.RWMutex // Protects concurrent page operations
-	pageIndex sync.Map     // Used for search functionality, stores page content in memory
+    mu        sync.RWMutex 	// Protects concurrent page operations
+	pageIndex sync.Map     	// Used for search functionality, stores page content in memory
+	batcher   *PageBatcher 	// Page batching for performance
+	pageCache PageCache		// Not a ptr
 }
 
 func (w *Wiki) initializeSearchIndex() error {
@@ -434,7 +494,11 @@ func NewWiki() (*Wiki, error) {
     wiki := &Wiki{
         templates: templates,
         limiter:   NewRequestLimiter(),
+        pageCache: PageCache{},
     }
+
+    // Create batcher after wiki is initialized
+    wiki.batcher = NewPageBatcher(wiki, 10, 100*time.Millisecond)
 
     // Initialize search index
     if err := wiki.initializeSearchIndex(); err != nil {
@@ -442,6 +506,134 @@ func NewWiki() (*Wiki, error) {
     }
 
     return wiki, nil
+}
+
+// Batching
+
+// Cache implementation
+func (c *PageCache) get(title string) (*Page, bool) {
+    if value, ok := c.cache.Load(title); ok {
+        page := value.(*Page)
+        // Check if cache entry is still valid
+        if time.Since(time.Unix(page.Modified_at, 0)).Milliseconds() < page_cache_ttl_ms {
+            return page, true
+        }
+        // Expired, remove from cache
+        c.cache.Delete(title)
+    }
+    return nil, false
+}
+
+func (c *PageCache) set(page *Page) {
+    c.cache.Store(page.Title, page)
+}
+
+func NewPageBatcher(wiki *Wiki, maxBatch int, timeout time.Duration) *PageBatcher {
+    if maxBatch <= 0 {
+        maxBatch = max_batch_size
+    }
+    if timeout <= 0 {
+        timeout = batch_timeout_ms * time.Millisecond
+    }
+
+    batcher := &PageBatcher{
+        operations: make(chan BatchOperation, maxBatch),
+        readOps:    make(chan ReadOperation, maxBatch),
+        maxBatch:   maxBatch,
+        timeout:    timeout,
+        wiki:       wiki,
+    }
+    go batcher.processLoop()  // Handle writes
+    go batcher.processReads() // Handle reads
+    return batcher
+}
+
+func (b *PageBatcher) processReads() {
+    batch := make([]*ReadOperation, 0, b.maxBatch)
+    timer := time.NewTimer(b.timeout)
+
+    for {
+        select {
+        case op := <-b.readOps:
+            batch = append(batch, &op)
+
+            if len(batch) >= b.maxBatch {
+                b.processReadBatch(batch)
+                batch = batch[:0]
+                timer.Reset(b.timeout)
+            }
+
+        case <-timer.C:
+            if len(batch) > 0 {
+                b.processReadBatch(batch)
+                batch = batch[:0]
+            }
+            timer.Reset(b.timeout)
+        }
+    }
+}
+
+func (b *PageBatcher) processReadBatch(batch []*ReadOperation) {
+    b.wiki.mu.RLock()
+    defer b.wiki.mu.RUnlock()
+
+    for _, op := range batch {
+        page, err := b.wiki.loadPageVersion(op.Title, op.Version)
+        op.Done <- ReadResult{Page: page, Err: err}
+    }
+}
+
+func (b *PageBatcher) processLoop() {
+    batch := make([]*BatchOperation, 0, b.maxBatch)
+    timer := time.NewTimer(b.timeout)
+
+    for {
+        select {
+        case op := <-b.operations:
+            batch = append(batch, &op)
+
+			// Process if batch is full
+            if len(batch) >= b.maxBatch {
+                b.processBatch(batch)
+                batch = batch[:0]
+                timer.Reset(b.timeout)
+
+                b.mu.Lock()
+                b.metrics.BatchesFull++
+                b.mu.Unlock()
+            }
+
+        case <-timer.C:
+            if len(batch) > 0 {
+				// Process partial batch on timeout
+                b.processBatch(batch)
+                batch = batch[:0]
+
+                b.mu.Lock()
+                b.metrics.BatchesPartial++
+                b.mu.Unlock()
+            }
+            timer.Reset(b.timeout)
+        }
+    }
+}
+
+func (b *PageBatcher) processBatch(batch []*BatchOperation) {
+    // Lock once for the entire batch
+    b.wiki.mu.Lock()
+    defer b.wiki.mu.Unlock()
+
+    for _, op := range batch {
+        err := b.wiki.savePage(op.Page, op.Comment)
+        op.Done <- err
+
+        b.mu.Lock()
+        b.metrics.Processed++
+        if err != nil {
+            b.metrics.Errors++
+        }
+        b.mu.Unlock()
+    }
 }
 
 // HTTP Handlers
@@ -458,6 +650,7 @@ func (w *Wiki) viewHandler(writer http.ResponseWriter, request *http.Request, ti
         return
     }
 
+    // Get version from query params
     version := int64(0)
     if v := request.URL.Query().Get("version"); v != "" {
         var err error
@@ -468,20 +661,26 @@ func (w *Wiki) viewHandler(writer http.ResponseWriter, request *http.Request, ti
         }
     }
 
-    w.mu.RLock()
-    page, err := w.loadPageVersion(title, version)
-    w.mu.RUnlock()
+    // Use batched read
+    result := make(chan ReadResult, 1)
+    w.batcher.readOps <- ReadOperation{
+        Title:   title,
+        Version: version,
+        Done:  result,
+    }
 
-    if err != nil {
-        if os.IsNotExist(err) {
+    // Wait for result
+    readResult := <-result
+    if readResult.Err != nil {
+        if os.IsNotExist(readResult.Err) {
             http.Redirect(writer, request, "/edit/"+title, http.StatusFound)
             return
         }
-        http.Error(writer, err.Error(), http.StatusInternalServerError)
+        http.Error(writer, readResult.Err.Error(), http.StatusInternalServerError)
         return
     }
 
-    w.renderTemplate(writer, "view", page)
+    w.renderTemplate(writer, "view", readResult.Page)
 }
 
 func (w *Wiki) editHandler(writer http.ResponseWriter, request *http.Request, title string) {
@@ -491,20 +690,103 @@ func (w *Wiki) editHandler(writer http.ResponseWriter, request *http.Request, ti
     }
     defer w.limiter.Release()
 
-    w.mu.RLock()
-    page, err := w.loadPageVersion(title, 0)
-    w.mu.RUnlock()
+    result := make(chan ReadResult, 1)
+    w.batcher.readOps <- ReadOperation{
+        Title:   title,
+        Version: 0, // Always get latest for edit
+        Done:  result,
+    }
 
-    if err != nil && !os.IsNotExist(err) {
-        http.Error(writer, err.Error(), http.StatusInternalServerError)
+    readResult := <-result
+    if readResult.Err != nil && !os.IsNotExist(readResult.Err) {
+        http.Error(writer, readResult.Err.Error(), http.StatusInternalServerError)
         return
     }
 
-    if err != nil {
-        page = &Page{Title: title}
+    if readResult.Err != nil {
+        // Page doesn't exist, create new
+        readResult.Page = &Page{Title: title}
     }
 
-    w.renderTemplate(writer, "edit", page)
+    w.renderTemplate(writer, "edit", readResult.Page)
+}
+
+func (w *Wiki) diffHandler(writer http.ResponseWriter, request *http.Request, title string) {
+    if err := w.limiter.Acquire(); err != nil {
+        http.Error(writer, err.Error(), http.StatusServiceUnavailable)
+        return
+    }
+    defer w.limiter.Release()
+
+    oldVersion, err := strconv.ParseInt(request.URL.Query().Get("old"), 10, 64)
+    if err != nil {
+        http.Error(writer, "Invalid old version", http.StatusBadRequest)
+        return
+    }
+
+    newVersion, err := strconv.ParseInt(request.URL.Query().Get("new"), 10, 64)
+    if err != nil {
+        http.Error(writer, "Invalid new version", http.StatusBadRequest)
+        return
+    }
+
+    // Read both versions in parallel
+    oldResult := make(chan ReadResult, 1)
+    newResult := make(chan ReadResult, 1)
+
+    w.batcher.readOps <- ReadOperation{
+        Title:   title,
+        Version: oldVersion,
+        Done:  oldResult,
+    }
+    w.batcher.readOps <- ReadOperation{
+        Title:   title,
+        Version: newVersion,
+        Done:  newResult,
+    }
+
+    // Wait for both results
+    oldReadResult := <-oldResult
+    newReadResult := <-newResult
+
+    if oldReadResult.Err != nil {
+        http.Error(writer, oldReadResult.Err.Error(), http.StatusInternalServerError)
+        return
+    }
+    if newReadResult.Err != nil {
+        http.Error(writer, newReadResult.Err.Error(), http.StatusInternalServerError)
+        return
+    }
+
+    // Generate diff
+    dmp := diffmatchpatch.New()
+    diffs := dmp.DiffMain(oldReadResult.Page.RawBody, newReadResult.Page.RawBody, true)
+
+    segments := make([]DiffSegment, len(diffs))
+    for i, diff := range diffs {
+        segments[i] = DiffSegment{Text: diff.Text}
+        switch diff.Type {
+        case diffmatchpatch.DiffEqual:
+            segments[i].Type = "equal"
+        case diffmatchpatch.DiffInsert:
+            segments[i].Type = "insert"
+            segments[i].Added = true
+        case diffmatchpatch.DiffDelete:
+            segments[i].Type = "delete"
+            segments[i].Removed = true
+        }
+    }
+
+    data := struct {
+        Title string
+        Diff  *VersionDiff
+    }{title, &VersionDiff{
+        OldVersion: oldVersion,
+        NewVersion: newVersion,
+        Diffs:      segments,
+    }}
+
+    w.renderTemplate(writer, "diff", data)
 }
 
 func (w *Wiki) saveHandler(writer http.ResponseWriter, request *http.Request, title string) {
@@ -528,11 +810,16 @@ func (w *Wiki) saveHandler(writer http.ResponseWriter, request *http.Request, ti
     comment := request.FormValue("comment")
     page := &Page{Title: title, RawBody: body}
 
-    w.mu.Lock()
-    err := w.savePage(page, comment)
-    w.mu.Unlock()
+    done := make(chan error, 1)
+    w.batcher.operations <- BatchOperation{
+        Page:    page,
+        Comment: comment,
+        Done:    done,
+    }
 
-    if err != nil {
+    // Wait for batch operation to complete
+	// Don't need direct mutex lock as batching system handles synchronization
+    if err := <-done; err != nil {
         http.Error(writer, err.Error(), http.StatusInternalServerError)
         return
     }
@@ -562,42 +849,6 @@ func (w *Wiki) historyHandler(writer http.ResponseWriter, request *http.Request,
     }{title, history}
 
     w.renderTemplate(writer, "history", data)
-}
-
-func (w *Wiki) diffHandler(writer http.ResponseWriter, request *http.Request, title string) {
-    if err := w.limiter.Acquire(); err != nil {
-        http.Error(writer, err.Error(), http.StatusServiceUnavailable)
-        return
-    }
-    defer w.limiter.Release()
-
-    oldVersion, err := strconv.ParseInt(request.URL.Query().Get("old"), 10, 64)
-    if err != nil {
-        http.Error(writer, "Invalid old version", http.StatusBadRequest)
-        return
-    }
-
-    newVersion, err := strconv.ParseInt(request.URL.Query().Get("new"), 10, 64)
-    if err != nil {
-        http.Error(writer, "Invalid new version", http.StatusBadRequest)
-        return
-    }
-
-    w.mu.RLock()
-    diff, err := w.compareVersions(title, oldVersion, newVersion)
-    w.mu.RUnlock()
-
-    if err != nil {
-        http.Error(writer, err.Error(), http.StatusInternalServerError)
-        return
-    }
-
-    data := struct {
-        Title string
-        Diff  *VersionDiff
-    }{title, diff}
-
-    w.renderTemplate(writer, "diff", data)
 }
 
 func (w *Wiki) restoreHandler(writer http.ResponseWriter, request *http.Request, title string) {
