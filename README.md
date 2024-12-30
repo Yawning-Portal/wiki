@@ -2,6 +2,11 @@
 
 A lightweight, safety-focused wiki engine written in Go, designed to be simple, fast, and intuitive.
 
+![Tests](https://github.com/github/docs/actions/workflows/test.yml/badge.svg)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
+[![Contributions Welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/yourusername/blazingly-fast-dev/issues)
+
 ## Motivation
 
 I have used WorldAnvil and Fandom; both are fantastic in their own right, and offer comprehensive,
